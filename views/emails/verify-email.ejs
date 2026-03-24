@@ -1,0 +1,37 @@
+<%
+/**
+ * Email Verification Template
+ * 
+ * Variables:
+ * - name: string - User's name
+ * - verificationUrl: string - URL to verify email
+ * - expiresIn: string - Token expiry time (e.g., "24 hours")
+ */
+%>
+<h2>Welcome to Samrakshya!</h2>
+
+<p>Hello <strong><%= name %></strong>,</p>
+
+<p>
+  Thank you for registering with Samrakshya. To complete your registration and 
+  access all features, please verify your email address by clicking the button below:
+</p>
+
+<div class="button-container">
+  <a href="<%= verificationUrl %>" class="button button-primary">
+    Verify Email Address
+  </a>
+</div>
+
+<div class="info-box">
+  <strong>Link expires in:</strong> <%= expiresIn %><br>
+  If the button doesn't work, copy and paste this URL into your browser:<br>
+  <a href="<%= verificationUrl %>" style="color: #3498db; word-break: break-all;">
+    <%= verificationUrl %>
+  </a>
+</div>
+
+<p class="text-muted">
+  If you did not create an account with Samrakshya, you can safely ignore this email.
+  Someone may have entered your email address by mistake.
+</p>
