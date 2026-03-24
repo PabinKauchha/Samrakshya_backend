@@ -1,120 +1,382 @@
-let sosActive = false;
-
 const express = require("express");
 const router = express.Router();
-const User = require("../models/User");
+
 const SOS = require("../models/sos");
+const { SOS_STATUS } = require("../models/sos");
+const EmergencyContact = require("../models/EmergencyContact");
+const { auth } = require("../middleware/auth");
+const validator = require("../middleware/validator");
+const catchAsync = require("../utils/catchAsync");
+const ApiError = require("../utils/ApiError");
+const ApiResponse = require("../utils/ApiResponse");
+const { sendSMS } = require("../utils/sendSMS");
 
+const {
+  triggerSosSchema,
+  confirmSosSchema,
+  cancelSosSchema,
+  getSosByIdSchema,
+  getSosHistorySchema,
+} = require("../validations/sos.validation");
 
-// Trigger SOS
-router.post("/trigger", async (req, res) => {
+/**
+ * Send SOS alert to a single contact
+ * @param {object} contact - Emergency contact document
+ * @param {object} user - User who triggered SOS
+ * @param {string} locationLink - Google Maps link
+ * @param {string} sosId - SOS event ID
+ * @returns {Promise<object>} - Notification result
+ */
+const sendSosAlert = async (contact, user, locationLink, sosId) => {
+  const confirmLink = `${process.env.BASE_URL || "http://localhost:3000"}/api/sos/confirm/${sosId}`;
+
+  const message = `EMERGENCY SOS from ${user.name}!
+
+${user.name} may be in danger and needs help.
+
+Location: ${locationLink}
+
+Please check on them immediately.
+
+Confirm you received this alert: ${confirmLink}
+
+This is an automated alert from Samrakshya Safety App.`;
+
   try {
-    const { email, latitude, longitude } = req.body;
+    await sendSMS(contact.phone, message);
+    return {
+      contact: contact._id,
+      name: contact.name,
+      phone: contact.phone,
+      notifiedAt: new Date(),
+      status: "sent",
+    };
+  } catch (error) {
+    console.error(`[SOS] Failed to notify ${contact.phone}:`, error.message);
+    return {
+      contact: contact._id,
+      name: contact.name,
+      phone: contact.phone,
+      notifiedAt: new Date(),
+      status: "failed",
+      failureReason: error.message,
+    };
+  }
+};
 
-    const user = await User.findOne({ email });
+/**
+ * TRIGGER SOS - POST /api/sos/trigger
+ * Requires authentication
+ * Notifies all emergency contacts immediately (no escalation delays)
+ */
+router.post(
+  "/trigger",
+  auth,
+  validator(triggerSosSchema),
+  catchAsync(async (req, res) => {
+    const { latitude, longitude } = req.body;
+    const user = req.user;
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    // Check if user has an active SOS already
+    const existingActive = await SOS.findOne({
+      user: user._id,
+      status: SOS_STATUS.ACTIVE,
+    });
+
+    if (existingActive) {
+      throw ApiError.badRequest(
+        "You already have an active SOS. Please cancel or confirm it before triggering a new one."
+      );
     }
 
-    const contacts = user.emergencyContacts;
+    // Get user's emergency contacts
+    const contacts = await EmergencyContact.find({ user: user._id });
 
     if (!contacts || contacts.length === 0) {
-      return res.json({ message: "No emergency contacts found" });
+      throw ApiError.badRequest(
+        "No emergency contacts found. Please add emergency contacts before triggering SOS."
+      );
     }
 
     const locationLink = `https://maps.google.com/?q=${latitude},${longitude}`;
 
-    // Save SOS event
+    // Create SOS event
     const sosEvent = new SOS({
-      email,
+      user: user._id,
       latitude,
       longitude,
       locationLink,
-      status: "active"
+      status: SOS_STATUS.ACTIVE,
     });
 
     await sosEvent.save();
 
-    sosActive = true;
+    console.log(`[SOS] TRIGGERED by ${user.email}`);
+    console.log(`[SOS] Location: ${locationLink}`);
 
-    console.log("🚨 SOS TRIGGERED");
-    console.log("Location:", locationLink);
+    // Notify ALL contacts immediately (no escalation delays)
+    const notificationResults = await Promise.all(
+      contacts.map((contact) =>
+        sendSosAlert(contact, user, locationLink, sosEvent._id)
+      )
+    );
 
-    contacts.forEach((contact, index) => {
+    // Update SOS with notified contacts
+    sosEvent.notifiedContacts = notificationResults.map((result) => ({
+      contact: result.contact,
+      name: result.name,
+      phone: result.phone,
+      notifiedAt: result.notifiedAt,
+    }));
 
-      setTimeout(() => {
+    await sosEvent.save();
 
-        if (!sosActive) {
-          console.log("SOS already confirmed. Escalation stopped.");
-          return;
-        }
+    const successCount = notificationResults.filter(
+      (r) => r.status === "sent"
+    ).length;
 
-        const confirmLink = "http://localhost:3000/api/sos/confirm";
+    console.log(
+      `[SOS] Notified ${successCount}/${contacts.length} contacts`
+    );
 
-        console.log(
-          `Alert sent to Contact ${index + 1}: ${contact.name} (${contact.phone})`
-        );
+    res
+      .status(201)
+      .json(
+        ApiResponse.created(
+          {
+            sosId: sosEvent._id,
+            location: locationLink,
+            contactsNotified: successCount,
+            totalContacts: contacts.length,
+          },
+          "SOS triggered successfully. All emergency contacts have been notified."
+        )
+      );
+  })
+);
 
-        console.log(`
-🚨 SOS ALERT
-User may be in danger.
+/**
+ * CONFIRM SOS - POST /api/sos/confirm/:id
+ * Can be accessed without authentication (for contacts clicking the link)
+ * Marks SOS as confirmed (user is safe)
+ */
+router.post(
+  "/confirm/:id",
+  validator(confirmSosSchema),
+  catchAsync(async (req, res) => {
+    const { id } = req.params;
 
-Location:
-${locationLink}
+    const sosEvent = await SOS.findById(id);
 
-Confirm alert:
-${confirmLink}
-        `);
+    if (!sosEvent) {
+      throw ApiError.notFound("SOS event not found");
+    }
 
-      }, index * 10000); // 10 second escalation delay
+    if (sosEvent.status !== SOS_STATUS.ACTIVE) {
+      return res.json(
+        ApiResponse.success(
+          { status: sosEvent.status },
+          `This SOS has already been ${sosEvent.status}.`
+        )
+      );
+    }
 
-    });
+    sosEvent.status = SOS_STATUS.CONFIRMED;
+    sosEvent.confirmedAt = new Date();
+    await sosEvent.save();
 
-    res.json({
-      message: "SOS escalation started",
-      location: locationLink
-    });
+    console.log(`[SOS] CONFIRMED - Event ${id}`);
 
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+    res.json(
+      ApiResponse.success(
+        { sosId: sosEvent._id, status: sosEvent.status },
+        "SOS confirmed. Thank you for responding."
+      )
+    );
+  })
+);
 
+/**
+ * GET /api/sos/confirm/:id - Allow GET for link clicks
+ * Displays a simple confirmation page or redirects
+ */
+router.get(
+  "/confirm/:id",
+  validator(confirmSosSchema),
+  catchAsync(async (req, res) => {
+    const { id } = req.params;
 
-// Confirm SOS (stop escalation)
-router.get("/confirm", async (req, res) => {
+    const sosEvent = await SOS.findById(id);
 
-  sosActive = false;
+    if (!sosEvent) {
+      throw ApiError.notFound("SOS event not found");
+    }
 
-  await SOS.updateMany(
-    { status: "active" },
-    { status: "confirmed" }
-  );
+    if (sosEvent.status !== SOS_STATUS.ACTIVE) {
+      return res.send(
+        `<html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
+          <h1>SOS Alert</h1>
+          <p>This SOS has already been ${sosEvent.status}.</p>
+        </body></html>`
+      );
+    }
 
-  console.log("✅ SOS CONFIRMED. Escalation stopped.");
+    sosEvent.status = SOS_STATUS.CONFIRMED;
+    sosEvent.confirmedAt = new Date();
+    await sosEvent.save();
 
-  res.send("Alert confirmed. Thank you for responding.");
+    console.log(`[SOS] CONFIRMED via GET - Event ${id}`);
 
-});
+    res.send(
+      `<html><body style="font-family: sans-serif; text-align: center; padding: 50px;">
+        <h1 style="color: green;">✓ Alert Confirmed</h1>
+        <p>Thank you for responding to the SOS alert.</p>
+        <p>The user has been marked as safe.</p>
+      </body></html>`
+    );
+  })
+);
 
+/**
+ * CANCEL SOS - POST /api/sos/cancel/:id
+ * Requires authentication - only the user who triggered can cancel
+ */
+router.post(
+  "/cancel/:id",
+  auth,
+  validator(cancelSosSchema),
+  catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const user = req.user;
 
-// View SOS history
-router.get("/history", async (req, res) => {
+    const sosEvent = await SOS.findById(id);
 
-  try {
+    if (!sosEvent) {
+      throw ApiError.notFound("SOS event not found");
+    }
 
-    const history = await SOS.find().sort({ time: -1 });
+    // Ensure user owns this SOS
+    if (sosEvent.user.toString() !== user._id.toString()) {
+      throw ApiError.forbidden("You can only cancel your own SOS events");
+    }
 
-    res.json(history);
+    if (sosEvent.status !== SOS_STATUS.ACTIVE) {
+      throw ApiError.badRequest(
+        `Cannot cancel SOS that has already been ${sosEvent.status}`
+      );
+    }
 
-  } catch (error) {
+    sosEvent.status = SOS_STATUS.CANCELLED;
+    await sosEvent.save();
 
-    res.status(500).json({ error: error.message });
+    console.log(`[SOS] CANCELLED by ${user.email} - Event ${id}`);
 
-  }
+    res.json(
+      ApiResponse.success(
+        { sosId: sosEvent._id, status: sosEvent.status },
+        "SOS cancelled successfully"
+      )
+    );
+  })
+);
 
-});
+/**
+ * GET SOS HISTORY - GET /api/sos/history
+ * Requires authentication - returns user's SOS history with pagination
+ * NOTE: Must be defined BEFORE /:id route
+ */
+router.get(
+  "/history",
+  auth,
+  validator(getSosHistorySchema),
+  catchAsync(async (req, res) => {
+    const user = req.user;
+    const { status, page = 1, limit = 10 } = req.query;
 
+    const filter = { user: user._id };
+    if (status) {
+      filter.status = status;
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [history, total] = await Promise.all([
+      SOS.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("notifiedContacts.contact", "name phone relationship"),
+      SOS.countDocuments(filter),
+    ]);
+
+    res.json(
+      ApiResponse.success({
+        history,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      })
+    );
+  })
+);
+
+/**
+ * GET ACTIVE SOS - GET /api/sos/active
+ * Requires authentication - returns user's currently active SOS (if any)
+ * NOTE: Must be defined BEFORE /:id route
+ */
+router.get(
+  "/active",
+  auth,
+  catchAsync(async (req, res) => {
+    const user = req.user;
+
+    const activeSos = await SOS.findOne({
+      user: user._id,
+      status: SOS_STATUS.ACTIVE,
+    }).populate("notifiedContacts.contact", "name phone relationship");
+
+    res.json(
+      ApiResponse.success(
+        { activeSos },
+        activeSos ? "Active SOS found" : "No active SOS"
+      )
+    );
+  })
+);
+
+/**
+ * GET SOS BY ID - GET /api/sos/:id
+ * Requires authentication - only the owner can view
+ * NOTE: Must be defined AFTER /history and /active routes
+ */
+router.get(
+  "/:id",
+  auth,
+  validator(getSosByIdSchema),
+  catchAsync(async (req, res) => {
+    const { id } = req.params;
+    const user = req.user;
+
+    const sosEvent = await SOS.findById(id).populate(
+      "notifiedContacts.contact",
+      "name phone relationship"
+    );
+
+    if (!sosEvent) {
+      throw ApiError.notFound("SOS event not found");
+    }
+
+    // Ensure user owns this SOS
+    if (sosEvent.user.toString() !== user._id.toString()) {
+      throw ApiError.forbidden("You can only view your own SOS events");
+    }
+
+    res.json(ApiResponse.success(sosEvent));
+  })
+);
 
 module.exports = router;
