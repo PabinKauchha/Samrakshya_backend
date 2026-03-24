@@ -10,6 +10,8 @@ const catchAsync = require("../utils/catchAsync");
 const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const { sendSMS } = require("../utils/sendSMS");
+const { assertOwnership } = require("../utils/checkOwnership");
+const { getPaginationMeta, getSkip } = require("../utils/pagination");
 
 const {
   triggerSosSchema,
@@ -255,10 +257,7 @@ router.post(
       throw ApiError.notFound("SOS event not found");
     }
 
-    // Ensure user owns this SOS
-    if (sosEvent.user.toString() !== user._id.toString()) {
-      throw ApiError.forbidden("You can only cancel your own SOS events");
-    }
+    assertOwnership(sosEvent.user, user._id, "SOS event");
 
     if (sosEvent.status !== SOS_STATUS.ACTIVE) {
       throw ApiError.badRequest(
@@ -298,8 +297,7 @@ router.get(
       filter.status = status;
     }
 
-    const skip = (page - 1) * limit;
-
+    const skip = getSkip(page, limit);
     const [history, total] = await Promise.all([
       SOS.find(filter)
         .sort({ createdAt: -1 })
@@ -309,15 +307,12 @@ router.get(
       SOS.countDocuments(filter),
     ]);
 
+    const pagination = getPaginationMeta(page, limit, total);
+
     res.json(
       ApiResponse.success({
         history,
-        pagination: {
-          page: Number(page),
-          limit: Number(limit),
-          total,
-          pages: Math.ceil(total / limit),
-        },
+        pagination,
       })
     );
   })
@@ -370,10 +365,7 @@ router.get(
       throw ApiError.notFound("SOS event not found");
     }
 
-    // Ensure user owns this SOS
-    if (sosEvent.user.toString() !== user._id.toString()) {
-      throw ApiError.forbidden("You can only view your own SOS events");
-    }
+    assertOwnership(sosEvent.user, user._id, "SOS event");
 
     res.json(ApiResponse.success(sosEvent));
   })

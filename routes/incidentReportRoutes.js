@@ -8,6 +8,8 @@ const catchAsync = require("../utils/catchAsync");
 const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
 const { sendIncidentAlert } = require("../utils/sendSMS");
+const { assertOwnership } = require("../utils/checkOwnership");
+const { getPaginationMeta, getSkip } = require("../utils/pagination");
 const {
   createIncidentSchema,
   getIncidentsSchema,
@@ -138,13 +140,11 @@ router.get(
       query.type = type;
     }
 
-    // Calculate pagination
-    const skip = (page - 1) * limit;
-
     // Build sort object
     const sort = { [sortBy]: order === "asc" ? 1 : -1 };
 
     // Execute query with pagination
+    const skip = getSkip(page, limit);
     const [incidents, total] = await Promise.all([
       IncidentReport.find(query)
         .sort(sort)
@@ -154,12 +154,12 @@ router.get(
       IncidentReport.countDocuments(query),
     ]);
 
+    const pagination = getPaginationMeta(page, limit, total);
+
     ApiResponse.ok(res, "Incidents fetched successfully.", {
       count: incidents.length,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
       incidents,
+      pagination,
     });
   })
 );
@@ -222,10 +222,7 @@ router.get(
       throw ApiError.notFound("Incident not found.");
     }
 
-    // Check ownership
-    if (incident.user.toString() !== req.user._id.toString()) {
-      throw ApiError.forbidden("Not authorized to access this incident.");
-    }
+    assertOwnership(incident.user, req.user._id, "incident");
 
     ApiResponse.ok(res, "Incident fetched successfully.", {
       incident,
@@ -251,10 +248,7 @@ router.patch(
       throw ApiError.notFound("Incident not found.");
     }
 
-    // Check ownership
-    if (incident.user.toString() !== req.user._id.toString()) {
-      throw ApiError.forbidden("Not authorized to update this incident.");
-    }
+    assertOwnership(incident.user, req.user._id, "incident");
 
     // Update fields
     const allowedUpdates = [
@@ -297,10 +291,7 @@ router.delete(
       throw ApiError.notFound("Incident not found.");
     }
 
-    // Check ownership
-    if (incident.user.toString() !== req.user._id.toString()) {
-      throw ApiError.forbidden("Not authorized to delete this incident.");
-    }
+    assertOwnership(incident.user, req.user._id, "incident");
 
     await IncidentReport.findByIdAndDelete(id);
 

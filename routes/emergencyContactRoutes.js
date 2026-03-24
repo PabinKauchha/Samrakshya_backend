@@ -5,6 +5,7 @@ const validator = require("../middleware/validator");
 const catchAsync = require("../utils/catchAsync");
 const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
+const { assertOwnership } = require("../utils/checkOwnership");
 const {
   createContactSchema,
   getContactsSchema,
@@ -99,10 +100,7 @@ router.get(
       throw ApiError.notFound("Emergency contact not found.");
     }
 
-    // Check ownership
-    if (contact.user.toString() !== req.user._id.toString()) {
-      throw ApiError.forbidden("Not authorized to access this contact.");
-    }
+    assertOwnership(contact.user, req.user._id, "contact");
 
     ApiResponse.ok(res, "Emergency contact fetched successfully.", {
       emergencyContact: contact,
@@ -128,10 +126,7 @@ router.patch(
       throw ApiError.notFound("Emergency contact not found.");
     }
 
-    // Check ownership
-    if (contact.user.toString() !== req.user._id.toString()) {
-      throw ApiError.forbidden("Not authorized to update this contact.");
-    }
+    assertOwnership(contact.user, req.user._id, "contact");
 
     // Check if updating phone to one that already exists
     if (req.body.phone && req.body.phone !== contact.phone) {
@@ -186,10 +181,7 @@ router.delete(
       throw ApiError.notFound("Emergency contact not found.");
     }
 
-    // Check ownership
-    if (contact.user.toString() !== req.user._id.toString()) {
-      throw ApiError.forbidden("Not authorized to delete this contact.");
-    }
+    assertOwnership(contact.user, req.user._id, "contact");
 
     await EmergencyContact.findByIdAndDelete(id);
 
