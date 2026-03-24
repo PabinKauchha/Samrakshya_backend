@@ -9,6 +9,13 @@ const connectDB = require("./config/db");
 const userRoutes = require("./routes/userRoutes");
 const sosRoutes = require("./routes/sosroutes");
 const authRoutes = require("./routes/authRoutes");
+const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
+const incidentReportRoutes = require("./routes/incidentReportRoutes");
+
+// Import error handling
+const ApiError = require("./utils/ApiError");
+const errorConverter = require("./middleware/errorConverter");
+const errorHandler = require("./middleware/errorHandler");
 
 const app = express();
 
@@ -23,28 +30,22 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/sos", sosRoutes);
+app.use("/api/emergency-contacts", emergencyContactRoutes);
+app.use("/api/incidents", incidentReportRoutes);
 
 // Health check endpoint
 app.get("/", (req, res) => {
   res.send("Samrakshya Backend Running");
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found",
-  });
+// 404 handler - convert to ApiError
+app.use((req, res, next) => {
+  next(ApiError.notFound("Route not found"));
 });
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error("Global error:", err);
-  res.status(500).json({
-    success: false,
-    message: "Internal server error",
-  });
-});
+// Error handling middleware chain
+app.use(errorConverter);
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
 
