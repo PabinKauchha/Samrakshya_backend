@@ -9,6 +9,9 @@ const {
   sendVerificationEmail,
   sendPasswordResetEmail,
 } = require("../utils/sendEmail");
+const catchAsync = require("../utils/catchAsync");
+const ApiError = require("../utils/ApiError");
+const ApiResponse = require("../utils/ApiResponse");
 
 const router = express.Router();
 
@@ -52,25 +55,20 @@ const generatePasswordResetToken = (id) => {
  * @desc    Register a new user and send verification email
  * @access  Public
  */
-router.post("/register", async (req, res) => {
-  try {
+router.post(
+  "/register",
+  catchAsync(async (req, res) => {
     const { name, email, password } = req.body;
 
     // Validate required fields
     if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide name, email, and password.",
-      });
+      throw ApiError.badRequest("Please provide name, email, and password.");
     }
 
     // Check if user already exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "An account with this email already exists.",
-      });
+      throw ApiError.conflict("An account with this email already exists.");
     }
 
     // Create new user
@@ -106,62 +104,32 @@ router.post("/register", async (req, res) => {
     // Generate auth token
     const authToken = generateAuthToken(user._id);
 
-    res.status(201).json({
-      success: true,
-      message: "Registration successful. Please check your email to verify your account.",
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isEmailVerified: user.isEmailVerified,
-        },
-        token: authToken,
+    ApiResponse.created(res, "Registration successful. Please check your email to verify your account.", {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: user.isEmailVerified,
       },
+      token: authToken,
     });
-  } catch (error) {
-    console.error("Registration error:", error);
-
-    // Handle mongoose validation errors
-    if (error.name === "ValidationError") {
-      const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: messages.join(". "),
-      });
-    }
-
-    // Handle duplicate key error
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: "An account with this email already exists.",
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Server error during registration.",
-    });
-  }
-});
+  })
+);
 
 /**
  * @route   POST /api/auth/login
  * @desc    Login user and return JWT token
  * @access  Public
  */
-router.post("/login", async (req, res) => {
-  try {
+router.post(
+  "/login",
+  catchAsync(async (req, res) => {
     const { email, password } = req.body;
 
     // Validate required fields
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide email and password.",
-      });
+      throw ApiError.badRequest("Please provide email and password.");
     }
 
     // Find user by email (include password for comparison)
@@ -170,57 +138,44 @@ router.post("/login", async (req, res) => {
     );
 
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
+      throw ApiError.unauthorized("Invalid email or password.");
     }
 
     // Compare passwords
     const isPasswordMatch = await user.comparePassword(password);
 
     if (!isPasswordMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
+      throw ApiError.unauthorized("Invalid email or password.");
     }
 
     // Generate auth token
     const token = generateAuthToken(user._id);
 
-    res.status(200).json({
-      success: true,
-      message: user.isEmailVerified
-        ? "Login successful."
-        : "Login successful. Please verify your email for full access.",
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isEmailVerified: user.isEmailVerified,
-        },
-        token,
+    const message = user.isEmailVerified
+      ? "Login successful."
+      : "Login successful. Please verify your email for full access.";
+
+    ApiResponse.ok(res, message, {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: user.isEmailVerified,
       },
+      token,
     });
-  } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error during login.",
-    });
-  }
-});
+  })
+);
 
 /**
  * @route   GET /api/auth/verify-email/:token
  * @desc    Verify user's email address
  * @access  Public
  */
-router.get("/verify-email/:token", async (req, res) => {
-  try {
+router.get(
+  "/verify-email/:token",
+  catchAsync(async (req, res) => {
     const { token } = req.params;
 
     // Verify the JWT token
@@ -228,18 +183,12 @@ router.get("/verify-email/:token", async (req, res) => {
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (jwtError) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired verification link.",
-      });
+      throw ApiError.badRequest("Invalid or expired verification link.");
     }
 
     // Check if it's a verification token
     if (decoded.purpose !== "email_verification") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid verification link.",
-      });
+      throw ApiError.badRequest("Invalid verification link.");
     }
 
     // Hash the token and find user
@@ -252,60 +201,41 @@ router.get("/verify-email/:token", async (req, res) => {
     }).select("+emailVerificationToken +emailVerificationExpires");
 
     if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired verification link.",
-      });
+      throw ApiError.badRequest("Invalid or expired verification link.");
     }
 
     // Check if already verified
     if (user.isEmailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is already verified.",
-      });
+      throw ApiError.badRequest("Email is already verified.");
     }
 
     // Verify email
     user.clearEmailVerification();
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Email verified successfully. You now have full access to all features.",
-    });
-  } catch (error) {
-    console.error("Email verification error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error during email verification.",
-    });
-  }
-});
+    ApiResponse.ok(res, "Email verified successfully. You now have full access to all features.");
+  })
+);
 
 /**
  * @route   POST /api/auth/resend-verification
  * @desc    Resend email verification link
  * @access  Private
  */
-router.post("/resend-verification", auth, async (req, res) => {
-  try {
+router.post(
+  "/resend-verification",
+  auth,
+  catchAsync(async (req, res) => {
     const user = await User.findById(req.user._id).select(
       "+emailVerificationToken +emailVerificationExpires"
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
+      throw ApiError.notFound("User not found.");
     }
 
     if (user.isEmailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is already verified.",
-      });
+      throw ApiError.badRequest("Email is already verified.");
     }
 
     // Generate new verification token
@@ -324,33 +254,22 @@ router.post("/resend-verification", auth, async (req, res) => {
     const verificationUrl = `${process.env.BASE_URL}/api/auth/verify-email/${verificationToken}`;
     await sendVerificationEmail(user.email, user.name, verificationUrl);
 
-    res.status(200).json({
-      success: true,
-      message: "Verification email sent. Please check your inbox.",
-    });
-  } catch (error) {
-    console.error("Resend verification error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error. Could not send verification email.",
-    });
-  }
-});
+    ApiResponse.ok(res, "Verification email sent. Please check your inbox.");
+  })
+);
 
 /**
  * @route   POST /api/auth/forgot-password
  * @desc    Send password reset email
  * @access  Public
  */
-router.post("/forgot-password", async (req, res) => {
-  try {
+router.post(
+  "/forgot-password",
+  catchAsync(async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide your email address.",
-      });
+      throw ApiError.badRequest("Please provide your email address.");
     }
 
     const user = await User.findOne({ email: email.toLowerCase() }).select(
@@ -359,10 +278,10 @@ router.post("/forgot-password", async (req, res) => {
 
     // Always return success message to prevent email enumeration
     if (!user) {
-      return res.status(200).json({
-        success: true,
-        message: "If an account with that email exists, a password reset link has been sent.",
-      });
+      return ApiResponse.ok(
+        res,
+        "If an account with that email exists, a password reset link has been sent."
+      );
     }
 
     // Generate password reset token
@@ -389,47 +308,33 @@ router.post("/forgot-password", async (req, res) => {
       user.passwordResetUsed = undefined;
       await user.save();
 
-      return res.status(500).json({
-        success: false,
-        message: "Could not send password reset email. Please try again later.",
-      });
+      throw ApiError.internal("Could not send password reset email. Please try again later.");
     }
 
-    res.status(200).json({
-      success: true,
-      message: "If an account with that email exists, a password reset link has been sent.",
-    });
-  } catch (error) {
-    console.error("Forgot password error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error. Could not process password reset request.",
-    });
-  }
-});
+    ApiResponse.ok(
+      res,
+      "If an account with that email exists, a password reset link has been sent."
+    );
+  })
+);
 
 /**
  * @route   POST /api/auth/reset-password/:token
  * @desc    Reset password using token (one-time use)
  * @access  Public
  */
-router.post("/reset-password/:token", async (req, res) => {
-  try {
+router.post(
+  "/reset-password/:token",
+  catchAsync(async (req, res) => {
     const { token } = req.params;
     const { password } = req.body;
 
     if (!password) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a new password.",
-      });
+      throw ApiError.badRequest("Please provide a new password.");
     }
 
     if (password.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 6 characters long.",
-      });
+      throw ApiError.badRequest("Password must be at least 6 characters long.");
     }
 
     // Verify the JWT token
@@ -437,18 +342,12 @@ router.post("/reset-password/:token", async (req, res) => {
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (jwtError) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired reset link.",
-      });
+      throw ApiError.badRequest("Invalid or expired reset link.");
     }
 
     // Check if it's a password reset token
     if (decoded.purpose !== "password_reset") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid reset link.",
-      });
+      throw ApiError.badRequest("Invalid reset link.");
     }
 
     // Hash the token and find user
@@ -461,18 +360,12 @@ router.post("/reset-password/:token", async (req, res) => {
     }).select("+passwordResetToken +passwordResetExpires +passwordResetUsed +password");
 
     if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired reset link.",
-      });
+      throw ApiError.badRequest("Invalid or expired reset link.");
     }
 
     // Check if token has already been used (one-time use)
     if (user.passwordResetUsed) {
-      return res.status(400).json({
-        success: false,
-        message: "This reset link has already been used. Please request a new one.",
-      });
+      throw ApiError.badRequest("This reset link has already been used. Please request a new one.");
     }
 
     // Update password and clear reset fields
@@ -480,106 +373,78 @@ router.post("/reset-password/:token", async (req, res) => {
     user.clearPasswordReset();
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Password reset successful. You can now login with your new password.",
-    });
-  } catch (error) {
-    console.error("Reset password error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error during password reset.",
-    });
-  }
-});
+    ApiResponse.ok(res, "Password reset successful. You can now login with your new password.");
+  })
+);
 
 /**
  * @route   GET /api/auth/me
  * @desc    Get current logged-in user's profile
  * @access  Private
  */
-router.get("/me", auth, async (req, res) => {
-  try {
+router.get(
+  "/me",
+  auth,
+  catchAsync(async (req, res) => {
     const user = await User.findById(req.user._id);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
+      throw ApiError.notFound("User not found.");
     }
 
-    res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isEmailVerified: user.isEmailVerified,
-          emergencyContacts: user.emergencyContacts,
-          createdAt: user.createdAt,
-        },
+    ApiResponse.ok(res, "Profile fetched successfully.", {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isEmailVerified: user.isEmailVerified,
+        emergencyContacts: user.emergencyContacts,
+        createdAt: user.createdAt,
       },
     });
-  } catch (error) {
-    console.error("Get profile error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching profile.",
-    });
-  }
-});
+  })
+);
 
 /**
  * @route   GET /api/auth/admin/users
  * @desc    Get all users (admin only)
  * @access  Private/Admin
  */
-router.get("/admin/users", auth, authorize(ROLES.ADMIN), async (req, res) => {
-  try {
+router.get(
+  "/admin/users",
+  auth,
+  authorize(ROLES.ADMIN),
+  catchAsync(async (req, res) => {
     const users = await User.find().select("-__v");
 
-    res.status(200).json({
-      success: true,
+    ApiResponse.ok(res, "Users fetched successfully.", {
       count: users.length,
-      data: {
-        users,
-      },
+      users,
     });
-  } catch (error) {
-    console.error("Get users error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching users.",
-    });
-  }
-});
+  })
+);
 
 /**
  * @route   PATCH /api/auth/admin/users/:id/role
  * @desc    Update user role (admin only)
  * @access  Private/Admin
  */
-router.patch("/admin/users/:id/role", auth, authorize(ROLES.ADMIN), async (req, res) => {
-  try {
+router.patch(
+  "/admin/users/:id/role",
+  auth,
+  authorize(ROLES.ADMIN),
+  catchAsync(async (req, res) => {
     const { id } = req.params;
     const { role } = req.body;
 
     if (!role || ![ROLES.USER, ROLES.ADMIN].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role. Must be 'user' or 'admin'.",
-      });
+      throw ApiError.badRequest("Invalid role. Must be 'user' or 'admin'.");
     }
 
     // Prevent admin from changing their own role
     if (id === req.user._id.toString()) {
-      return res.status(400).json({
-        success: false,
-        message: "You cannot change your own role.",
-      });
+      throw ApiError.badRequest("You cannot change your own role.");
     }
 
     const user = await User.findByIdAndUpdate(
@@ -589,31 +454,18 @@ router.patch("/admin/users/:id/role", auth, authorize(ROLES.ADMIN), async (req, 
     );
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
+      throw ApiError.notFound("User not found.");
     }
 
-    res.status(200).json({
-      success: true,
-      message: `User role updated to ${role}.`,
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
+    ApiResponse.ok(res, `User role updated to ${role}.`, {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
       },
     });
-  } catch (error) {
-    console.error("Update role error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error updating user role.",
-    });
-  }
-});
+  })
+);
 
 module.exports = router;
