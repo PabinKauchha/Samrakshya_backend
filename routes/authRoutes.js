@@ -399,7 +399,6 @@ router.get(
         email: user.email,
         role: user.role,
         isEmailVerified: user.isEmailVerified,
-        emergencyContacts: user.emergencyContacts,
         createdAt: user.createdAt,
       },
     });

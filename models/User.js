@@ -34,12 +34,6 @@ const UserSchema = new mongoose.Schema(
       },
       default: ROLES.USER,
     },
-    emergencyContacts: [
-      {
-        name: String,
-        phone: String,
-      },
-    ],
 
     // Email verification fields
     isEmailVerified: {
