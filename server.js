@@ -6,9 +6,8 @@ const cors = require("cors");
 const connectDB = require("./config/db");
 
 // Import routes
-const userRoutes = require("./routes/userRoutes");
-const sosRoutes = require("./routes/sosroutes");
 const authRoutes = require("./routes/authRoutes");
+const sosRoutes = require("./routes/sosroutes");
 const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
 const incidentReportRoutes = require("./routes/incidentReportRoutes");
 
@@ -28,7 +27,6 @@ app.use(express.json());
 
 // Routes
 app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
 app.use("/api/sos", sosRoutes);
 app.use("/api/emergency-contacts", emergencyContactRoutes);
 app.use("/api/incidents", incidentReportRoutes);
