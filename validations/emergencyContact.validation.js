@@ -1,22 +1,6 @@
 const { z } = require("zod/v4");
 const { RELATIONSHIPS_ARRAY } = require("../constants/relationships");
-
-/**
- * Reusable schema for MongoDB ObjectId validation
- */
-const mongoIdSchema = z
-  .string()
-  .regex(/^[a-fA-F0-9]{24}$/, "Invalid ID format");
-
-/**
- * Phone number validation schema
- * Supports international format with optional + prefix
- */
-const phoneSchema = z
-  .string()
-  .min(10, "Phone must be at least 10 digits")
-  .max(15, "Phone must be at most 15 digits")
-  .regex(/^\+?[1-9]\d{9,14}$/, "Invalid phone format");
+const { mongoIdSchema, mongoIdParamsSchema, phoneSchema } = require("./common");
 
 /**
  * CREATE - POST /api/emergency-contacts
@@ -54,18 +38,14 @@ const getContactsSchema = z.object({
  * GET ONE - GET /api/emergency-contacts/:id
  */
 const getContactByIdSchema = z.object({
-  params: z.object({
-    id: mongoIdSchema,
-  }),
+  params: mongoIdParamsSchema,
 });
 
 /**
  * UPDATE - PATCH /api/emergency-contacts/:id
  */
 const updateContactSchema = z.object({
-  params: z.object({
-    id: mongoIdSchema,
-  }),
+  params: mongoIdParamsSchema,
   body: z
     .object({
       name: z.string().trim().min(1).max(100).optional(),
@@ -83,9 +63,7 @@ const updateContactSchema = z.object({
  * DELETE - DELETE /api/emergency-contacts/:id
  */
 const deleteContactSchema = z.object({
-  params: z.object({
-    id: mongoIdSchema,
-  }),
+  params: mongoIdParamsSchema,
 });
 
 module.exports = {

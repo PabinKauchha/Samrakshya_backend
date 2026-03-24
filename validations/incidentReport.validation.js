@@ -3,28 +3,11 @@ const {
   INCIDENT_TYPES,
   INCIDENT_TYPES_ARRAY,
 } = require("../constants/incidentTypes");
-
-/**
- * Reusable schema for MongoDB ObjectId validation
- */
-const mongoIdSchema = z
-  .string()
-  .regex(/^[a-fA-F0-9]{24}$/, "Invalid ID format");
-
-/**
- * Location schema for incident reports
- */
-const locationSchema = z.object({
-  latitude: z.coerce
-    .number()
-    .min(-90, "Latitude must be between -90 and 90")
-    .max(90, "Latitude must be between -90 and 90"),
-  longitude: z.coerce
-    .number()
-    .min(-180, "Longitude must be between -180 and 180")
-    .max(180, "Longitude must be between -180 and 180"),
-  address: z.string().max(500, "Address must be at most 500 characters").optional(),
-});
+const {
+  mongoIdParamsSchema,
+  locationWithAddressSchema,
+  paginationQuerySchema,
+} = require("./common");
 
 /**
  * CREATE - POST /api/incidents
@@ -50,7 +33,7 @@ const createIncidentSchema = z.object({
         .trim()
         .max(100, "Custom type must be at most 100 characters")
         .optional(),
-      location: locationSchema,
+      location: locationWithAddressSchema,
       occurredAt: z.coerce.date({
         message: "Invalid date format for occurredAt",
       }),
@@ -70,11 +53,9 @@ const createIncidentSchema = z.object({
  * GET ALL - GET /api/incidents
  */
 const getIncidentsSchema = z.object({
-  query: z
-    .object({
+  query: paginationQuerySchema
+    .extend({
       type: z.enum(INCIDENT_TYPES_ARRAY).optional(),
-      page: z.coerce.number().int().positive().default(1),
-      limit: z.coerce.number().int().positive().max(100).default(10),
       sortBy: z.enum(["createdAt", "occurredAt"]).default("createdAt"),
       order: z.enum(["asc", "desc"]).default("desc"),
     })
@@ -86,25 +67,21 @@ const getIncidentsSchema = z.object({
  * GET ONE - GET /api/incidents/:id
  */
 const getIncidentByIdSchema = z.object({
-  params: z.object({
-    id: mongoIdSchema,
-  }),
+  params: mongoIdParamsSchema,
 });
 
 /**
  * UPDATE - PATCH /api/incidents/:id
  */
 const updateIncidentSchema = z.object({
-  params: z.object({
-    id: mongoIdSchema,
-  }),
+  params: mongoIdParamsSchema,
   body: z
     .object({
       title: z.string().trim().min(1).max(200).optional(),
       description: z.string().trim().max(2000).optional(),
       type: z.enum(INCIDENT_TYPES_ARRAY).optional(),
       customType: z.string().trim().max(100).optional(),
-      location: locationSchema.optional(),
+      location: locationWithAddressSchema.optional(),
       occurredAt: z.coerce.date().optional(),
     })
     .refine((data) => Object.keys(data).length > 0, {
@@ -116,9 +93,7 @@ const updateIncidentSchema = z.object({
  * DELETE - DELETE /api/incidents/:id
  */
 const deleteIncidentSchema = z.object({
-  params: z.object({
-    id: mongoIdSchema,
-  }),
+  params: mongoIdParamsSchema,
 });
 
 /**
