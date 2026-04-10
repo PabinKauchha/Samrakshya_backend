@@ -57,7 +57,7 @@ const generatePasswordResetToken = (id) => {
  */
 router.post(
   "/register",
-  catchAsync(async (req, res) => {
+  catchAsync(async (req, res, next) => {
     const { name, email, password } = req.body;
 
     // Validate required fields
@@ -382,15 +382,20 @@ router.post(
  * @desc    Get current logged-in user's profile
  * @access  Private
  */
+
 router.get(
   "/me",
   auth,
   catchAsync(async (req, res) => {
+    const EmergencyContact = require("../models/EmergencyContact");
+
     const user = await User.findById(req.user._id);
 
     if (!user) {
       throw ApiError.notFound("User not found.");
     }
+
+    const contacts = await EmergencyContact.find({ user: req.user._id });
 
     ApiResponse.ok(res, "Profile fetched successfully.", {
       user: {
@@ -400,11 +405,12 @@ router.get(
         role: user.role,
         isEmailVerified: user.isEmailVerified,
         createdAt: user.createdAt,
+        emergencyContacts: contacts, // ✅ FINAL FIX
       },
     });
   })
 );
-
+  
 /**
  * @route   GET /api/auth/admin/users
  * @desc    Get all users (admin only)

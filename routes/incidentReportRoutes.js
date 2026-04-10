@@ -1,15 +1,21 @@
 const express = require("express");
+const router = express.Router();
+
 const IncidentReport = require("../models/IncidentReport");
 const EmergencyContact = require("../models/EmergencyContact");
 const User = require("../models/User");
+
 const { auth } = require("../middleware/auth");
 const validator = require("../middleware/validator");
 const catchAsync = require("../utils/catchAsync");
+
 const ApiError = require("../utils/ApiError");
 const ApiResponse = require("../utils/ApiResponse");
+
 const { sendIncidentAlert } = require("../utils/sendSMS");
 const { assertOwnership } = require("../utils/checkOwnership");
 const { getPaginationMeta, getSkip } = require("../utils/pagination");
+
 const {
   createIncidentSchema,
   getIncidentsSchema,
@@ -19,13 +25,11 @@ const {
   viewIncidentSchema,
 } = require("../validations/incidentReport.validation");
 
-const router = express.Router();
 
-/**
- * @route   POST /api/incidents
- * @desc    Create a new incident report and notify emergency contacts
- * @access  Private
- */
+// ==========================================
+// 🚨 CREATE INCIDENT
+// POST /api/incidents
+// ==========================================
 router.post(
   "/",
   auth,
@@ -34,7 +38,6 @@ router.post(
     const { title, description, type, customType, location, occurredAt } =
       req.body;
 
-    // Create incident
     const incident = new IncidentReport({
       user: req.user._id,
       title,
@@ -47,7 +50,7 @@ router.post(
 
     await incident.save();
 
-    // Get user's active emergency contacts
+    // 🔹 Get contacts
     const contacts = await EmergencyContact.find({
       user: req.user._id,
       isActive: true,
@@ -59,40 +62,37 @@ router.post(
       failed: 0,
     };
 
-    // Send notifications if there are contacts
     if (contacts.length > 0) {
       const user = await User.findById(req.user._id);
+
       const notificationResults = await sendIncidentAlert(
         incident,
         user,
         contacts
       );
 
-      // Update incident with notification results
       incident.notifiedContacts = notificationResults;
       await incident.save();
 
-      // Calculate summary
       notificationSummary.sent = notificationResults.filter(
         (n) => n.status === "sent"
       ).length;
+
       notificationSummary.failed = notificationResults.filter(
         (n) => n.status === "failed"
       ).length;
     }
 
-    // Build response message
     let message = "Incident reported successfully.";
     if (contacts.length === 0) {
-      message +=
-        " No emergency contacts configured - no notifications were sent.";
+      message += " No emergency contacts configured.";
     } else if (notificationSummary.failed === 0) {
-      message += ` ${notificationSummary.sent} emergency contact(s) notified.`;
+      message += ` ${notificationSummary.sent} contact(s) notified.`;
     } else {
-      message += ` ${notificationSummary.sent} of ${notificationSummary.total} contact(s) notified. ${notificationSummary.failed} notification(s) failed.`;
+      message += ` ${notificationSummary.sent}/${notificationSummary.total} notified, ${notificationSummary.failed} failed.`;
     }
 
-    ApiResponse.created(res, message, {
+    return ApiResponse.created(res, message, {
       incident: {
         _id: incident._id,
         title: incident.title,
@@ -115,11 +115,11 @@ router.post(
   })
 );
 
-/**
- * @route   GET /api/incidents
- * @desc    Get all incidents for the authenticated user (paginated)
- * @access  Private
- */
+
+// ==========================================
+// 📄 GET INCIDENTS (PAGINATED)
+// GET /api/incidents
+// ==========================================
 router.get(
   "/",
   auth,
@@ -135,16 +135,12 @@ router.get(
 
     const query = { user: req.user._id };
 
-    // Filter by type if provided
-    if (type) {
-      query.type = type;
-    }
+    if (type) query.type = type;
 
-    // Build sort object
     const sort = { [sortBy]: order === "asc" ? 1 : -1 };
 
-    // Execute query with pagination
     const skip = getSkip(page, limit);
+
     const [incidents, total] = await Promise.all([
       IncidentReport.find(query)
         .sort(sort)
@@ -156,7 +152,7 @@ router.get(
 
     const pagination = getPaginationMeta(page, limit, total);
 
-    ApiResponse.ok(res, "Incidents fetched successfully.", {
+    return ApiResponse.ok(res, "Incidents fetched successfully", {
       count: incidents.length,
       incidents,
       pagination,
@@ -164,11 +160,11 @@ router.get(
   })
 );
 
-/**
- * @route   GET /api/incidents/view/:viewToken
- * @desc    Public view of incident for notified contacts
- * @access  Public
- */
+
+// ==========================================
+// 🌐 PUBLIC VIEW (FOR CONTACTS)
+// GET /api/incidents/view/:viewToken
+// ==========================================
 router.get(
   "/view/:viewToken",
   validator(viewIncidentSchema),
@@ -182,11 +178,10 @@ router.get(
       );
 
     if (!incident) {
-      throw ApiError.notFound("Incident not found or invalid view link.");
+      throw ApiError.notFound("Incident not found.");
     }
 
-    // Return limited information for public view
-    ApiResponse.ok(res, "Incident fetched successfully.", {
+    return ApiResponse.ok(res, "Incident fetched", {
       incident: {
         title: incident.title,
         description: incident.description,
@@ -202,11 +197,11 @@ router.get(
   })
 );
 
-/**
- * @route   GET /api/incidents/:id
- * @desc    Get a single incident by ID
- * @access  Private
- */
+
+// ==========================================
+// 📄 GET SINGLE INCIDENT
+// GET /api/incidents/:id
+// ==========================================
 router.get(
   "/:id",
   auth,
@@ -224,17 +219,15 @@ router.get(
 
     assertOwnership(incident.user, req.user._id, "incident");
 
-    ApiResponse.ok(res, "Incident fetched successfully.", {
-      incident,
-    });
+    return ApiResponse.ok(res, "Incident fetched", { incident });
   })
 );
 
-/**
- * @route   PATCH /api/incidents/:id
- * @desc    Update an incident report
- * @access  Private
- */
+
+// ==========================================
+// ✏️ UPDATE INCIDENT
+// PATCH /api/incidents/:id
+// ==========================================
 router.patch(
   "/:id",
   auth,
@@ -250,7 +243,6 @@ router.patch(
 
     assertOwnership(incident.user, req.user._id, "incident");
 
-    // Update fields
     const allowedUpdates = [
       "title",
       "description",
@@ -259,6 +251,7 @@ router.patch(
       "location",
       "occurredAt",
     ];
+
     allowedUpdates.forEach((field) => {
       if (req.body[field] !== undefined) {
         incident[field] = req.body[field];
@@ -267,17 +260,15 @@ router.patch(
 
     await incident.save();
 
-    ApiResponse.ok(res, "Incident updated successfully.", {
-      incident,
-    });
+    return ApiResponse.ok(res, "Incident updated", { incident });
   })
 );
 
-/**
- * @route   DELETE /api/incidents/:id
- * @desc    Delete an incident report
- * @access  Private
- */
+
+// ==========================================
+// 🗑 DELETE INCIDENT
+// DELETE /api/incidents/:id
+// ==========================================
 router.delete(
   "/:id",
   auth,
@@ -295,8 +286,9 @@ router.delete(
 
     await IncidentReport.findByIdAndDelete(id);
 
-    ApiResponse.ok(res, "Incident deleted successfully.");
+    return ApiResponse.ok(res, "Incident deleted successfully");
   })
 );
+
 
 module.exports = router;

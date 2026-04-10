@@ -108,6 +108,27 @@ router.get(
   })
 );
 
+router.delete(
+  "/:id",
+  auth,
+  validator(deleteContactSchema),
+  catchAsync(async (req, res) => {
+    const { id } = req.params;
+
+    const contact = await EmergencyContact.findById(id);
+
+    if (!contact) {
+      throw ApiError.notFound("Emergency contact not found.");
+    }
+
+    assertOwnership(contact.user, req.user._id, "contact");
+
+    await EmergencyContact.findByIdAndDelete(id);
+
+    ApiResponse.ok(res, "Emergency contact deleted successfully.");
+  })
+);
+
 /**
  * @route   PATCH /api/emergency-contacts/:id
  * @desc    Update an emergency contact
@@ -148,6 +169,7 @@ router.patch(
       "relationship",
       "priority",
       "isActive",
+      "priority"
     ];
     allowedUpdates.forEach((field) => {
       if (req.body[field] !== undefined) {

@@ -30,17 +30,21 @@ const {
  * @returns {Promise<object>} - Notification result
  */
 const sendSosAlert = async (contact, user, locationLink, sosId) => {
-  const confirmLink = `${process.env.BASE_URL || "http://localhost:3000"}/api/sos/confirm/${sosId}`;
-
-  const message = `EMERGENCY SOS from ${user.name}!
+  const confirmLink = `${process.env.BASE_URL || "http://localhost:4321"}/api/sos/confirm/${sosId}`;
+  const trackLink = `${process.env.BASE_URL || "http://localhost:4321"}/api/sos/track/${sosId}`;
+  const shareBackLink = `${process.env.BASE_URL}/share-location.html?sosId=${sosId}`;
+ const message = `EMERGENCY SOS from ${user.name}!
 
 ${user.name} may be in danger and needs help.
 
-Location: ${locationLink}
+📍 Live Location:
+${locationLink}
 
-Please check on them immediately.
+📲 Send your location back:
+${shareBackLink}
 
-Confirm you received this alert: ${confirmLink}
+✅ Confirm you received this alert:
+${confirmLink}
 
 This is an automated alert from Samrakshya Safety App.`;
 
@@ -66,6 +70,42 @@ This is an automated alert from Samrakshya Safety App.`;
   }
 };
 
+const escalateSOS = async (contacts, user, sosId) => {
+  let contactIndex = 0;
+  let tick = 0;
+
+  while (contactIndex < contacts.length) {
+    await new Promise((resolve) => setTimeout(resolve, 20000)); // 20 sec
+    tick++;
+
+    const updatedSOS = await SOS.findById(sosId);
+
+    if (!updatedSOS || updatedSOS.status !== SOS_STATUS.ACTIVE) {
+      console.log("🛑 SOS stopped. Ending escalation.");
+      break;
+    }
+
+    const latestLocation = updatedSOS.locations?.length
+      ? updatedSOS.locations[updatedSOS.locations.length - 1]
+      : null;
+
+    const locationLink = latestLocation
+      ? `https://maps.google.com/?q=${latestLocation.lat},${latestLocation.lng}`
+      : updatedSOS.locationLink;
+
+    console.log(
+  `[SOS] Tick ${tick} (${tick * 20}s) - Location: ${locationLink}`
+);
+
+    // 🔥 every 60 sec → next contact
+    if (tick % 3 === 0) {
+      const contact = contacts[contactIndex];
+      console.log(`[SOS] Alerting ${contact.name}`);
+      await sendSosAlert(contact, user, locationLink, sosId);
+      contactIndex++;
+    }
+  }
+};
 /**
  * TRIGGER SOS - POST /api/sos/trigger
  * Requires authentication
@@ -79,7 +119,6 @@ router.post(
     const { latitude, longitude } = req.body;
     const user = req.user;
 
-    // Check if user has an active SOS already
     const existingActive = await SOS.findOne({
       user: user._id,
       status: SOS_STATUS.ACTIVE,
@@ -87,73 +126,48 @@ router.post(
 
     if (existingActive) {
       throw ApiError.badRequest(
-        "You already have an active SOS. Please cancel or confirm it before triggering a new one."
+        "You already have an active SOS."
       );
     }
 
-    // Get user's emergency contacts
     const contacts = await EmergencyContact.find({ user: user._id });
 
-    if (!contacts || contacts.length === 0) {
-      throw ApiError.badRequest(
-        "No emergency contacts found. Please add emergency contacts before triggering SOS."
-      );
+    if (!contacts.length) {
+      throw ApiError.badRequest("No emergency contacts found.");
     }
 
     const locationLink = `https://maps.google.com/?q=${latitude},${longitude}`;
 
-    // Create SOS event
     const sosEvent = new SOS({
       user: user._id,
       latitude,
       longitude,
       locationLink,
       status: SOS_STATUS.ACTIVE,
+      locations: [
+        {
+          lat: latitude,
+          lng: longitude,
+        },
+      ],
+      lastAlertAt: new Date(),
     });
 
     await sosEvent.save();
 
-    console.log(`[SOS] TRIGGERED by ${user.email}`);
-    console.log(`[SOS] Location: ${locationLink}`);
+    // 🔥 Send first alert instantly
+    await sendSosAlert(contacts[0], user, locationLink, sosEvent._id);
 
-    // Notify ALL contacts immediately (no escalation delays)
-    const notificationResults = await Promise.all(
-      contacts.map((contact) =>
-        sendSosAlert(contact, user, locationLink, sosEvent._id)
-      )
-    );
+    // 🔥 Background escalation (DO NOT await)
+      escalateSOS(contacts.slice(1), user, sosEvent._id)
+      .catch(err => console.error("Escalation failed:", err));
 
-    // Update SOS with notified contacts
-    sosEvent.notifiedContacts = notificationResults.map((result) => ({
-      contact: result.contact,
-      name: result.name,
-      phone: result.phone,
-      notifiedAt: result.notifiedAt,
-    }));
-
-    await sosEvent.save();
-
-    const successCount = notificationResults.filter(
-      (r) => r.status === "sent"
-    ).length;
-
-    console.log(
-      `[SOS] Notified ${successCount}/${contacts.length} contacts`
-    );
-
-    res
-      .status(201)
-      .json(
-        ApiResponse.created(
-          {
-            sosId: sosEvent._id,
-            location: locationLink,
-            contactsNotified: successCount,
-            totalContacts: contacts.length,
-          },
-          "SOS triggered successfully. All emergency contacts have been notified."
-        )
-      );
+    // ✅ ONLY ONE RESPONSE
+    return ApiResponse.created(res, "SOS triggered successfully", {
+      sosId: sosEvent._id,
+      location: locationLink,
+      totalContacts: contacts.length,
+    });
   })
 );
 
@@ -293,11 +307,10 @@ router.get(
     const { status, page = 1, limit = 10 } = req.query;
 
     const filter = { user: user._id };
-    if (status) {
-      filter.status = status;
-    }
+    if (status) filter.status = status;
 
     const skip = getSkip(page, limit);
+
     const [history, total] = await Promise.all([
       SOS.find(filter)
         .sort({ createdAt: -1 })
@@ -309,11 +322,15 @@ router.get(
 
     const pagination = getPaginationMeta(page, limit, total);
 
-    res.json(
-      ApiResponse.success({
-        history,
-        pagination,
-      })
+    // ✅ THIS IS THE ONLY CORRECT LINE
+    return res.json(
+      ApiResponse.success(
+        {
+          history,
+          pagination,
+        },
+        "SOS history fetched successfully"
+      )
     );
   })
 );
@@ -348,6 +365,72 @@ router.get(
  * Requires authentication - only the owner can view
  * NOTE: Must be defined AFTER /history and /active routes
  */
+// ==========================================
+// 👥 GUARDIAN LOCATION SHARE → USER
+// POST /api/sos/guardian-location/:sosId
+// ==========================================
+router.post(
+  "/guardian-location/:sosId",
+  catchAsync(async (req, res) => {
+    const { sosId } = req.params;
+    const { lat, lng } = req.body;
+
+    if (lat == null || lng == null) {
+      throw ApiError.badRequest("Latitude and longitude required");
+    }
+
+    const sos = await SOS.findById(sosId);
+
+    if (!sos) {
+      throw ApiError.notFound("SOS not found");
+    }
+
+    // OPTIONAL: you can validate contact via phone/token later
+   if (!sos.guardianLocations) {
+  sos.guardianLocations = [];
+}
+
+sos.guardianLocations.push({
+  lat,
+  lng,
+  timestamp: new Date(),
+});
+
+    await sos.save();
+
+    res.json(ApiResponse.success(null, "Guardian location received"));
+  })
+);
+
+router.get(
+  "/track/:id",
+  catchAsync(async (req, res) => {
+    const { id } = req.params;
+
+    const sosEvent = await SOS.findById(id);
+
+    if (!sosEvent) {
+      throw ApiError.notFound("SOS not found");
+    }
+
+    // ❗ NO auth, NO ownership check
+
+   return res.json(
+  ApiResponse.success(
+    {
+      sosEvent: {
+        latitude: sos.latitude,
+        longitude: sos.longitude,
+        locations: sos.locations || [],
+        guardianLocations: sos.guardianLocations || [],
+      },
+    },
+    "Tracking data fetched"
+  )
+);
+  })
+);
+
 router.get(
   "/:id",
   auth,
@@ -368,6 +451,108 @@ router.get(
     assertOwnership(sosEvent.user, user._id, "SOS event");
 
     res.json(ApiResponse.success(sosEvent));
+  })
+);
+
+
+
+// ==========================================
+// 📍 UPDATE LIVE LOCATION
+// POST /api/sos/location
+// ==========================================
+router.post(
+  "/location",
+  auth,
+  catchAsync(async (req, res) => {
+    const { lat, lng } = req.body;
+
+    if (lat == null || lng == null) {
+      throw ApiError.badRequest("Latitude and longitude are required");
+    }
+
+    const sos = await SOS.findOne({
+      user: req.user._id,
+      status: SOS_STATUS.ACTIVE,
+    });
+
+    if (!sos) {
+      throw ApiError.notFound("No active SOS found");
+    }
+
+    if (!sos.locations) {
+      sos.locations = [];
+    }
+
+    sos.locations.push({
+      lat,
+      lng,
+      timestamp: new Date(),
+    });
+
+    // keep only last 100 points
+    if (sos.locations.length > 100) {
+      sos.locations.shift();
+    }
+
+    // update latest location
+    sos.latitude = lat;
+    sos.longitude = lng;
+
+    await sos.save();
+
+    res.json(ApiResponse.success(null, "Location updated"));
+  })
+);
+
+// ==========================================
+// 🚨 RESEND ALERT (every 60 sec)
+// POST /api/sos/alert
+// ==========================================
+router.post(
+  "/alert",
+  auth,
+  catchAsync(async (req, res) => {
+    const sos = await SOS.findOne({
+      user: req.user._id,
+      status: SOS_STATUS.ACTIVE,
+    });
+
+    if (!sos) {
+      throw ApiError.notFound("No active SOS found");
+    }
+
+    // ⛔ prevent spam (60 sec cooldown)
+    if (sos.lastAlertAt && Date.now() - sos.lastAlertAt < 60000) {
+      return res.json(ApiResponse.success(null, "Cooldown active"));
+    }
+
+    const user = req.user;
+
+    const contacts = await EmergencyContact.find({
+      user: user._id,
+    });
+
+    if (!contacts.length) {
+      throw ApiError.badRequest("No emergency contacts found");
+    }
+
+    const latestLocation = sos.locations?.length
+      ? sos.locations[sos.locations.length - 1]
+      : null;
+
+    const locationLink = latestLocation
+      ? `https://maps.google.com/?q=${latestLocation.lat},${latestLocation.lng}`
+      : sos.locationLink;
+
+    // send alert to ALL contacts again
+    for (let contact of contacts) {
+      await sendSosAlert(contact, user, locationLink, sos._id);
+    }
+
+    sos.lastAlertAt = new Date();
+    await sos.save();
+
+    res.json(ApiResponse.success(null, "Alert sent again"));
   })
 );
 

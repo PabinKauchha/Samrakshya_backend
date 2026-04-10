@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Live SOS Tracking</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+  <style>
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const sosId = params.get("sosId");
+
+const map = L.map('map').setView([27.7, 85.3], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// 🔴 User icon
+const userIcon = L.icon({
+  iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+  iconSize: [40, 40],
+});
+
+// 🟢 Guardian icon
+const guardianIcon = L.icon({
+  iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+  iconSize: [40, 40],
+});
+
+let userMarker;
+let guardianMarker;
+let pathLine;
+
+async function fetchSOS() {
+  try {
+    const res = await fetch(`http://localhost:4321/api/sos/track/${sosId}`);
+    const data = await res.json();
+
+    const sos = data.data.sosEvent;
+
+    if (!sos) return;
+
+    const lat = sos.latitude;
+    const lng = sos.longitude;
+
+    // 🔴 USER MARKER
+    if (lat && lng) {
+      if (!userMarker) {
+        userMarker = L.marker([lat, lng], { icon: userIcon }).addTo(map);
+      } else {
+        userMarker.setLatLng([lat, lng]);
+      }
+    }
+
+    // 📍 PATH LINE (movement trail)
+    if (sos.locations && sos.locations.length > 0) {
+      const path = sos.locations.map(loc => [loc.lat, loc.lng]);
+
+      if (!pathLine) {
+        pathLine = L.polyline(path).addTo(map);
+      } else {
+        pathLine.setLatLngs(path);
+      }
+    }
+
+    // 🟢 GUARDIAN MARKER
+    if (sos.guardianLocations && sos.guardianLocations.length > 0) {
+      const lastGuardian =
+        sos.guardianLocations[sos.guardianLocations.length - 1];
+
+      if (!guardianMarker) {
+        guardianMarker = L.marker(
+          [lastGuardian.lat, lastGuardian.lng],
+          { icon: guardianIcon }
+        ).addTo(map);
+      } else {
+        guardianMarker.setLatLng([lastGuardian.lat, lastGuardian.lng]);
+      }
+    }
+
+    // auto focus on user
+    if (lat && lng) {
+      map.setView([lat, lng], 16);
+    }
+
+  } catch (err) {
+    console.error("Fetch error:", err);
+  }
+}
+
+// 🔄 update every 5 sec
+setInterval(fetchSOS, 5000);
+
+// first load
+fetchSOS();
+</script>
+
+</body>
+</html>

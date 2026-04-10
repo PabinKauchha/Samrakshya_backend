@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Share Location</title>
+</head>
+<body>
+  <h2>Sharing your location...</h2>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const sosId = urlParams.get("sosId");
+
+    if (!sosId) {
+      alert("Invalid SOS link");
+    }
+
+    navigator.geolocation.watchPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+
+      try {
+        await fetch(`/api/sos/guardian-location/${sosId}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            lat: latitude,
+            lng: longitude,
+          }),
+        });
+
+        console.log("📍 Guardian location sent");
+      } catch (err) {
+        console.error("Failed:", err);
+      }
+    });
+  </script>
+</body>
+</html>

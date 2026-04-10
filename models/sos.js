@@ -19,6 +19,8 @@ const sosSchema = new mongoose.Schema(
       required: [true, "User reference is required"],
       index: true,
     },
+
+    // 🔥 ORIGINAL FIRST LOCATION (keep this)
     latitude: {
       type: Number,
       required: [true, "Latitude is required"],
@@ -31,9 +33,11 @@ const sosSchema = new mongoose.Schema(
       min: [-180, "Longitude must be between -180 and 180"],
       max: [180, "Longitude must be between -180 and 180"],
     },
+
     locationLink: {
       type: String,
     },
+
     status: {
       type: String,
       enum: {
@@ -42,6 +46,55 @@ const sosSchema = new mongoose.Schema(
       },
       default: SOS_STATUS.ACTIVE,
     },
+confirmedBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "EmergencyContact",
+},
+
+rescuerLocations: [
+  {
+    contact: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "EmergencyContact",
+    },
+    lat: Number,
+    lng: Number,
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+],
+    // ==========================================
+    // 🔥 NEW: REAL-TIME LOCATION TRACKING
+    // ==========================================
+    locations: [
+      {
+        lat: Number,
+        lng: Number,
+        timestamp: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+guardianLocations: [
+  {
+    lat: Number,
+    lng: Number,
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+],
+    // ==========================================
+    // 🔥 NEW: ALERT COOLDOWN
+    // ==========================================
+    lastAlertAt: {
+      type: Date,
+    },
+
     // Track which contacts were notified
     notifiedContacts: [
       {
@@ -55,8 +108,11 @@ const sosSchema = new mongoose.Schema(
           type: Date,
           default: Date.now,
         },
+        status: String,
+        failureReason: String,
       },
     ],
+
     confirmedAt: {
       type: Date,
     },

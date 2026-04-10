@@ -11,7 +11,6 @@ const RELATIONSHIPS = Object.freeze({
   RELATIVE: "relative",
   NEIGHBOR: "neighbor",
   COWORKER: "coworker",
-  OTHER: "other",
 });
 
 /**
