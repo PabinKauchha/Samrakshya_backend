@@ -12,6 +12,7 @@ const ApiResponse = require("../utils/ApiResponse");
 const { sendSMS } = require("../utils/sendSMS");
 const { assertOwnership } = require("../utils/checkOwnership");
 const { getPaginationMeta, getSkip } = require("../utils/pagination");
+const { sendWhatsApp } = require("../utils/sendWhatsapp");
 
 const {
   triggerSosSchema,
@@ -50,6 +51,11 @@ This is an automated alert from Samrakshya Safety App.`;
 
   try {
     await sendSMS(contact.phone, message);
+
+    await sendWhatsApp(contact.phone, message).catch((err) =>
+      console.error(`[WhatsApp] Failed for ${contact.phone}:`, err.message)
+    );
+
     return {
       contact: contact._id,
       name: contact.name,
@@ -155,14 +161,11 @@ router.post(
 
     await sosEvent.save();
 
-    // 🔥 Send first alert instantly
     await sendSosAlert(contacts[0], user, locationLink, sosEvent._id);
 
-    // 🔥 Background escalation (DO NOT await)
       escalateSOS(contacts.slice(1), user, sosEvent._id)
       .catch(err => console.error("Escalation failed:", err));
 
-    // ✅ ONLY ONE RESPONSE
     return ApiResponse.created(res, "SOS triggered successfully", {
       sosId: sosEvent._id,
       location: locationLink,
@@ -366,7 +369,6 @@ router.get(
  * NOTE: Must be defined AFTER /history and /active routes
  */
 // ==========================================
-// 👥 GUARDIAN LOCATION SHARE → USER
 // POST /api/sos/guardian-location/:sosId
 // ==========================================
 router.post(
@@ -413,7 +415,6 @@ router.get(
       throw ApiError.notFound("SOS not found");
     }
 
-    // ❗ NO auth, NO ownership check
 
    return res.json(
   ApiResponse.success(
@@ -454,12 +455,6 @@ router.get(
   })
 );
 
-
-
-// ==========================================
-// 📍 UPDATE LIVE LOCATION
-// POST /api/sos/location
-// ==========================================
 router.post(
   "/location",
   auth,
@@ -504,10 +499,7 @@ router.post(
   })
 );
 
-// ==========================================
-// 🚨 RESEND ALERT (every 60 sec)
-// POST /api/sos/alert
-// ==========================================
+
 router.post(
   "/alert",
   auth,

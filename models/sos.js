@@ -20,7 +20,6 @@ const sosSchema = new mongoose.Schema(
       index: true,
     },
 
-    // 🔥 ORIGINAL FIRST LOCATION (keep this)
     latitude: {
       type: Number,
       required: [true, "Latitude is required"],
@@ -65,9 +64,6 @@ rescuerLocations: [
     },
   },
 ],
-    // ==========================================
-    // 🔥 NEW: REAL-TIME LOCATION TRACKING
-    // ==========================================
     locations: [
       {
         lat: Number,
@@ -88,9 +84,7 @@ guardianLocations: [
     },
   },
 ],
-    // ==========================================
-    // 🔥 NEW: ALERT COOLDOWN
-    // ==========================================
+
     lastAlertAt: {
       type: Date,
     },

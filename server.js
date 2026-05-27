@@ -26,18 +26,37 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 
-// 🔍 DEBUG LOGGER (keep this)
 app.use((req, res, next) => {
-  console.log("\n---------------------------");
-  console.log("METHOD:", req.method);
-  console.log("URL:", req.url);
-  console.log("BODY:", req.body);
+  res.setHeader("Cache-Control", "no-store");
   next();
 });
 
-// ================= ROUTES =================
+app.use((req, res, next) => {
+  const ignoredRoutes = [
+    "/api/admin/stats",
+    "/api/admin/active-sos",
+    "/api/sos/active",
+    "/api/sos/history"
+  ];
 
-// 🔥 TEST ADMIN ROUTE (VERY IMPORTANT DEBUG)
+  if (
+    req.method === "GET" &&
+    ignoredRoutes.includes(req.url)
+  ) {
+    return next();
+  }
+
+  console.log("\n---------------------------");
+  console.log("METHOD:", req.method);
+  console.log("URL:", req.url);
+
+  if (Object.keys(req.body || {}).length) {
+    console.log("BODY:", req.body);
+  }
+
+  next();
+});
+
 app.get("/api/admin/test", (req, res) => {
   res.send("✅ Admin route working");
 });

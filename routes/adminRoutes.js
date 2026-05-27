@@ -28,7 +28,7 @@ router.get(
   auth,
   adminOnly,
   catchAsync(async (req, res) => {
-    console.log("🔥 /api/admin/stats HIT");
+    //console.log("🔥 /api/admin/stats HIT");
 
     const totalUsers = await User.countDocuments();
     const totalSOS = await SOS.countDocuments();
@@ -59,7 +59,7 @@ router.get(
   auth,
   adminOnly,
   catchAsync(async (req, res) => {
-    console.log("🔥 /api/admin/active-sos HIT");
+    //console.log("🔥 /api/admin/active-sos HIT");
 
     const sosList = await SOS.find({ status: "active" })
       .populate("user", "name email")
