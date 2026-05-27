@@ -5,14 +5,14 @@ const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
 
-// 🔥 IMPORT ROUTES
+// IMPORT
 const authRoutes = require("./routes/authRoutes");
 const sosRoutes = require("./routes/sosroutes");
 const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
 const incidentReportRoutes = require("./routes/incidentReportRoutes");
 const adminRoutes = require("./routes/adminRoutes"); // ✅ IMPORTANT
 
-// 🔥 ERROR HANDLING
+// ERROR HANDLING
 const ApiError = require("./utils/ApiError");
 const errorConverter = require("./middleware/errorConverter");
 const errorHandler = require("./middleware/errorHandler");
