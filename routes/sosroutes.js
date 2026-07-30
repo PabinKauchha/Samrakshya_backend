@@ -103,7 +103,7 @@ const escalateSOS = async (contacts, user, sosId) => {
   `[SOS] Tick ${tick} (${tick * 20}s) - Location: ${locationLink}`
 );
 
-    // 🔥 every 60 sec → next contact
+    // every 60 sec → next contact
     if (tick % 3 === 0) {
       const contact = contacts[contactIndex];
       console.log(`[SOS] Alerting ${contact.name}`);
@@ -325,7 +325,6 @@ router.get(
 
     const pagination = getPaginationMeta(page, limit, total);
 
-    // ✅ THIS IS THE ONLY CORRECT LINE
     return res.json(
       ApiResponse.success(
         {
@@ -366,7 +365,6 @@ router.get(
 /**
  * GET SOS BY ID - GET /api/sos/:id
  * Requires authentication - only the owner can view
- * NOTE: Must be defined AFTER /history and /active routes
  */
 // ==========================================
 // POST /api/sos/guardian-location/:sosId
